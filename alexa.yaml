@@ -35,28 +35,6 @@ sequence:
 - service: media_player.volume_set
   metadata: {}
   data:
-    volume_level: "{{ volume }}"
-  target:
-    entity_id: "{{ onde_anunciar }}"
-- delay:
-    hours: 0
-    minutes: 0
-    seconds: 1
-    milliseconds: 0
-- service: notify.alexa_media
-  data:
-    message: "{{ mensagem }}"
-    data:
-      type: announce
-    target: "{{ onde_anunciar }}"
-- delay:
-    hours: 0
-    minutes: 0
-    seconds: 300
-    milliseconds: 0
-- service: media_player.volume_set
-  metadata: {}
-  data:
     volume_level: 0.5
   target:
     entity_id: "{{ onde_anunciar }}"
