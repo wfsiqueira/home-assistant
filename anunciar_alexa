@@ -1,111 +1,137 @@
-blueprint:
-  name: Set Echo Group Based On Room Occupancy
-  description: >
-    Set an Echo Group based on a Room's Occupancy
-    
-    
-    References:
-    
-    - https://www.home-assistant.io/integrations/group/
-    
-    
-    Example name to give an automation created by this blueprint:
-    
-    - Set Living Room Occupancy Echo Group
-    
-    
-    Who is this blueprint for?
-    
-    - This blueprint is for anyone that has Amazon echo devices and only wants to programmatically
-    play Announcements, TTS messages, and sounds on those devices in which the room is occupied.
-    
-    
-    What does this blueprint do?
-    
-    - The blueprint will create a new entity group with a name that is based on your 'Room Name' input.
-    This group will be named 'group.room_name_occupancy_echos'.
-      
-    - This new group will then be updated each time
-    your selected Occupancy Sensor's state changes.  The contents of the new group will either contain all
-    of your selected 'Echo Devices' when the occupancy sensor is 'On' or it will be empty when the
-    occupancy sensor is 'Off'.  You can then use this group in other automations to play echo announcements,
-    tts messages, or sounds only when that room is occupied.
-      
-    - For example, you may simply replace your echo device entity with this new group entity in any
-    automation you are running those services. But wait, there's more...
-    
-    
-    Unleash the Power:
-    
-    - The true power of this blueprint comes after you have created all of your room occupancy echo groups;
-    where you can then create your own group (NOT using this blueprint) that contains the entities of all
-    the echo groups you have created.  You might assign this very powerful group a name 'All Rooms Occupancy Echos'.
-    This new 'All Rooms Occupancy Echo Group' will allow you to play Announcments, TTS messages, and sounds on
-    any echo device in your entire house, but only in those rooms that are currently occupied.  No longer will you hear
-    six different devices 'echoing' (no pun intended) throughout your house from rooms that aren't occupied.
-      
-    - The 'All Rooms Occupancy Echos' group is the only group I personally use in my Amazon echo announcements.
-    
-    
-    Prerequisites:
-    
-    - Must have Amazon echo device entities exposed, via the [alexa media player]
-    (https://github.com/custom-components/alexa_media_player/wiki) integration for example.
-      
-    - Must have a single sensor, switch, or input_boolean setup per room that contains an echo device which
-    will signal when that room is occupied.  There are numerous ways to accomplish this.  You could technically
-    use a single motion sensor, but keep in mind most motion sensors time-out (or return to an 'off' status)
-    in less than 30 seconds, which is typically too short of time to accurately reflect the correct occupancy
-    status of a room in most scenerios.
-    
-    
-    Removal:
-    
-    - Deleting an automation created by this blueprint will automatically remove that occupancy group on the next
-    home assistant startup.
-      
-  domain: automation
-  input:
-    room_name:
-      name: Room Name
-      description: >
-        Example: Living Room
-    occupancy_sensor:
-      name: Room Occupancy Sensor
-      description: >
-        Select a single sensor used to determine if the room is occupied. Either use one sensor or a 
-        single group containing multiple sensors.
-      selector:
-        entity:
-          #domain: binary_sensor
-    echo_devices:
-      name: Echo Devices
-      description: Select the echo device(s) for this room.  Multiple echos seperated by comma.
-      selector:
-        entity:
-          #domain: media_player
-
-trigger:
-  - platform: state
-    entity_id: !input occupancy_sensor
-  - platform: homeassistant
-    event: start
-
-variables:
-  # Make inputs available as a script level variable
-  sensor_var: !input occupancy_sensor
-  devices_var: !input echo_devices
-  room_name_var: !input room_name
-
-action:
-  - service: group.set
-    data:
-      object_id: "{{ room_name_var | lower | replace(' ','_') }}_occupancy_echos"
-      name: "{{ room_name_var | title }} Occupancy Echos"
-      entities: |
-        {% if is_state(sensor_var, 'on') %}
-          {{ devices_var }}
-        {% else %}
-          []
-        {% endif %}
-mode: single
+script:
+  kla_alexa_play:
+    alias: Alexa Play
+    icon: mdi:play
+    mode: queued
+    max: 10
+    description:
+      Falls Alexa sprechen darf (bestimmte Zeiten etc.), liest die dafür
+      definierte Gruppe die als Parameter übergebene Nachricht vor
+    fields:
+      message:
+        description: Nachricht, welche Alexa vorlesen soll
+        example: Was darf ich für dich tun?
+      alexa:
+        description:
+          Alexa, welche sprechen soll (optional, 
+          es spricht der zuletzt aktive Echo)
+        example: echo_show8
+      type:
+        description: Alexa Ausgabetyp [TTS/command/sequence] (optional)
+        example: tts
+      volume_level:
+        description:
+          Lautstärke in der die Nachricht vorgelesen werden soll [0-30]
+          (optional, ursprüngliche Lautstärke wird wieder zurückgesetzt)
+        example: "1"
+      force:
+        description: Überspringe die Prüfungen, ob Alexa reden darf (optional)
+        example: "true"
+    sequence:
+      - condition: or
+        conditions:
+          - condition: template
+            value_template: >
+              {{ force is defined and force }}
+          - condition: and
+            conditions:
+              - condition: state
+                entity_id: binary_sensor.kla_alexa_is_allowed_to_speak
+                state: "on"
+              - condition: state
+                entity_id: binary_sensor.kla_anyone_home
+                state: "on"
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ alexa is defined and alexa != ''
+                    and states('media_player.' + alexa) not in ['None', 'unknown', 'unavailable']
+                    and volume_level is defined
+                    and (0 <= (volume_level | int(0)) <= 30) }}
+            sequence:
+              - service: input_number.set_value
+                data_template:
+                  value: >
+                    {% set alexa_media = 'media_player.' + alexa %}
+                    {% if (state_attr(alexa_media, 'volume_level') | float(0.33)) > 0 %}
+                      {{ state_attr(alexa_media, 'volume_level') | float(0.33) }}
+                    {% else %}
+                      {{ ((volume_level | int(0)) / 30 | float(0.33)) | round(2) }}
+                    {% endif %}
+                entity_id: input_number.kla_alexa_volume_tmp
+              - condition: template
+                value_template: >
+                  {{ (state_attr('media_player.' + alexa, 'volume_level') | float(0.33)) !=
+                    ((volume_level | int(0)) / 30 | float(0.33)) | round(2) }}
+              - service: media_player.volume_set
+                data_template:
+                  entity_id: media_player.{{ alexa }}
+                  volume_level: >
+                    {{ ((volume_level | int(0)) / 30 | float(0.03)) | round(2) }}
+        default: []
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ type is not defined or (type is defined and type == "tts") }}
+            sequence:
+              - service: >
+                  {% if alexa is defined and alexa != '' -%}
+                    notify.alexa_media_{{ alexa }}
+                  {%- elif states(states('sensor.kla_alexa_last_active')) not in ['None', 'unknown', 'unavailable'] -%}
+                    notify.alexa_media_{{ states('sensor.kla_alexa_last_active').split('.')[1]}}
+                  {% endif %}
+                data_template:
+                  data:
+                    type: tts
+                  message: "{{ message }}"
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ type is defined and type == "command" }}
+            sequence:
+              - service: media_player.play_media
+                data_template:
+                  entity_id: >
+                    {% if alexa is defined and alexa != '' -%}
+                      media_player.{{ alexa }}
+                    {%- elif states(states('sensor.kla_alexa_last_active'))
+                      not in ['None', 'unknown', 'unavailable'] -%}
+                    {{ states('sensor.kla_alexa_last_active') }}{% endif %}
+                  media_content_id: "{{ message }}"
+                  media_content_type: custom
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ type is defined and type == "sequence" }}
+            sequence:
+              - service: media_player.play_media
+                data_template:
+                  entity_id: >
+                    {% if alexa is defined and alexa != '' -%}
+                      media_player.{{ alexa }}
+                    {%- elif states(states('sensor.kla_alexa_last_active'))
+                      not in ['None', 'unknown', 'unavailable'] -%}
+                    {{ states('sensor.kla_alexa_last_active') }}{% endif %}
+                  media_content_id: "{{ message }}"
+                  media_content_type: sequence
+        default: []
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ alexa is defined and alexa != ''
+                    and states('media_player.' + alexa) not in ['None', 'unknown', 'unavailable']
+                    and volume_level is defined
+                    and (0 <= (volume_level | int(0)) <= 30)
+                    and state_attr('media_player.' + alexa, 'volume_level') !=
+                    states('input_number.kla_alexa_volume_tmp') }}
+            sequence:
+              - service: media_player.volume_set
+                data_template:
+                  entity_id: >
+                    {{ 'media_player.' + alexa }}
+                  volume_level: >
+                    {{ states('input_number.kla_alexa_volume_tmp') | float(0.33) }}
+        default: []
