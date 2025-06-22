@@ -1,137 +1,94 @@
-script:
-  kla_alexa_play:
-    alias: Alexa Play
-    icon: mdi:play
-    mode: queued
-    max: 10
-    description:
-      Falls Alexa sprechen darf (bestimmte Zeiten etc.), liest die dafür
-      definierte Gruppe die als Parameter übergebene Nachricht vor
-    fields:
-      message:
-        description: Nachricht, welche Alexa vorlesen soll
-        example: Was darf ich für dich tun?
-      alexa:
-        description:
-          Alexa, welche sprechen soll (optional, 
-          es spricht der zuletzt aktive Echo)
-        example: echo_show8
-      type:
-        description: Alexa Ausgabetyp [TTS/command/sequence] (optional)
-        example: tts
-      volume_level:
-        description:
-          Lautstärke in der die Nachricht vorgelesen werden soll [0-30]
-          (optional, ursprüngliche Lautstärke wird wieder zurückgesetzt)
-        example: "1"
-      force:
-        description: Überspringe die Prüfungen, ob Alexa reden darf (optional)
-        example: "true"
-    sequence:
-      - condition: or
-        conditions:
-          - condition: template
-            value_template: >
-              {{ force is defined and force }}
-          - condition: and
-            conditions:
-              - condition: state
-                entity_id: binary_sensor.kla_alexa_is_allowed_to_speak
-                state: "on"
-              - condition: state
-                entity_id: binary_sensor.kla_anyone_home
-                state: "on"
-      - choose:
-          - conditions:
-              - condition: template
-                value_template: >
-                  {{ alexa is defined and alexa != ''
-                    and states('media_player.' + alexa) not in ['None', 'unknown', 'unavailable']
-                    and volume_level is defined
-                    and (0 <= (volume_level | int(0)) <= 30) }}
-            sequence:
-              - service: input_number.set_value
-                data_template:
-                  value: >
-                    {% set alexa_media = 'media_player.' + alexa %}
-                    {% if (state_attr(alexa_media, 'volume_level') | float(0.33)) > 0 %}
-                      {{ state_attr(alexa_media, 'volume_level') | float(0.33) }}
-                    {% else %}
-                      {{ ((volume_level | int(0)) / 30 | float(0.33)) | round(2) }}
-                    {% endif %}
-                entity_id: input_number.kla_alexa_volume_tmp
-              - condition: template
-                value_template: >
-                  {{ (state_attr('media_player.' + alexa, 'volume_level') | float(0.33)) !=
-                    ((volume_level | int(0)) / 30 | float(0.33)) | round(2) }}
-              - service: media_player.volume_set
-                data_template:
-                  entity_id: media_player.{{ alexa }}
-                  volume_level: >
-                    {{ ((volume_level | int(0)) / 30 | float(0.03)) | round(2) }}
-        default: []
-      - choose:
-          - conditions:
-              - condition: template
-                value_template: >
-                  {{ type is not defined or (type is defined and type == "tts") }}
-            sequence:
-              - service: >
-                  {% if alexa is defined and alexa != '' -%}
-                    notify.alexa_media_{{ alexa }}
-                  {%- elif states(states('sensor.kla_alexa_last_active')) not in ['None', 'unknown', 'unavailable'] -%}
-                    notify.alexa_media_{{ states('sensor.kla_alexa_last_active').split('.')[1]}}
-                  {% endif %}
-                data_template:
-                  data:
-                    type: tts
-                  message: "{{ message }}"
-          - conditions:
-              - condition: template
-                value_template: >
-                  {{ type is defined and type == "command" }}
-            sequence:
-              - service: media_player.play_media
-                data_template:
-                  entity_id: >
-                    {% if alexa is defined and alexa != '' -%}
-                      media_player.{{ alexa }}
-                    {%- elif states(states('sensor.kla_alexa_last_active'))
-                      not in ['None', 'unknown', 'unavailable'] -%}
-                    {{ states('sensor.kla_alexa_last_active') }}{% endif %}
-                  media_content_id: "{{ message }}"
-                  media_content_type: custom
-          - conditions:
-              - condition: template
-                value_template: >
-                  {{ type is defined and type == "sequence" }}
-            sequence:
-              - service: media_player.play_media
-                data_template:
-                  entity_id: >
-                    {% if alexa is defined and alexa != '' -%}
-                      media_player.{{ alexa }}
-                    {%- elif states(states('sensor.kla_alexa_last_active'))
-                      not in ['None', 'unknown', 'unavailable'] -%}
-                    {{ states('sensor.kla_alexa_last_active') }}{% endif %}
-                  media_content_id: "{{ message }}"
-                  media_content_type: sequence
-        default: []
-      - choose:
-          - conditions:
-              - condition: template
-                value_template: >
-                  {{ alexa is defined and alexa != ''
-                    and states('media_player.' + alexa) not in ['None', 'unknown', 'unavailable']
-                    and volume_level is defined
-                    and (0 <= (volume_level | int(0)) <= 30)
-                    and state_attr('media_player.' + alexa, 'volume_level') !=
-                    states('input_number.kla_alexa_volume_tmp') }}
-            sequence:
-              - service: media_player.volume_set
-                data_template:
-                  entity_id: >
-                    {{ 'media_player.' + alexa }}
-                  volume_level: >
-                    {{ states('input_number.kla_alexa_volume_tmp') | float(0.33) }}
-        default: []
+blueprint:
+  name: Notify Alexa
+  domain: script
+  homeassistant:
+    min_version: 2023.6.0
+  author: TheAppleFreak
+  source_url: https://github.com/TheAppleFreak/home-assistant-blueprints/blob/main/notify_alexa.yaml
+  description: >
+    # Notify Alexa Blueprint
+
+    This blueprint allows you to more easily access the features exposed by the [Alexa Media Player](https://github.com/custom-components/alexa_media_player/wiki/Configuration) custom integration. This gives you an easy GUI-driven way to configure its options, as well as to select which devices will receive the messages.
+
+    ## Setup
+
+    Before you do anything else, make sure that you install the [Alexa Media Player custom component](https://github.com/custom-components/alexa_media_player) (available through HACS) and [configure it accordingly](https://github.com/custom-components/alexa_media_player/wiki/Configuration)! Without this, this blueprint won't work at all.
+
+    
+
+    **There's no configuration available on this screen**; you'll need to create a new script from this blueprint first (make sure to give it a memorable name)! Once done, you can call the script using the "call service" action in automations, which should then present you with four potential options.
+
+    ![Screenshot of a script created from this blueprint](https://community-assets.home-assistant.io/original/4X/a/9/3/a93019ad683ec892b461e29545221b3e35c08052.png)
+
+    There are four primary options available:
+
+    * **Device(s) to send message to** - This lets you selectively send a message to specific Alexa devices. You can select as many devices as you want. If not specified, the message will be sent to all Alexa devices available.
+    
+    * **Title** - The title to show with the message. Only available with Announce and Mobile Push, and only shows on devices with a screen.
+    
+    * **Message** - The actual message to be read out using TTS. When the type is set to "Announce," [Amazon's flavor of SSML markup can be used](https://developer.amazon.com/en-US/docs/alexa/custom-skills/speech-synthesis-markup-language-ssml-reference.html) to direct hwo the message should be read out.  
+    
+    * **Notification type** - A selection between three different message types. TTS won't play a chime before messages, Announce will play a chime, and Mobile Push sends a push notification to phones. 
+    
+
+    Despite what the UI says, there is no response variable support.
+
+
+    As a reminder, **you will need to create the script first before you will see the configuration options listed above.**
+icon: mdi:bullhorn
+fields: 
+  devices:
+    name: Device(s) to send message to
+    description: If not specified, then all Alexa devices will receive the message.
+    required: false
+    selector:
+      device:
+        entity:
+          - integration: alexa_media
+        multiple: true
+  title: 
+    name: Title
+    description: The title to display on devices with a screen. Only works when the message type is set to Announce or Mobile Push.
+    required: false
+    selector:
+      text: 
+  message:
+    name: Message
+    description: The TTS message. When using Announce, SSML markup is supported.
+    required: true
+    selector:
+      text:
+  type:
+    name: Notification type
+    description: The type of notification to send out.
+    required: true
+    selector:
+      select: 
+        options: 
+          - label: TTS (does not play chime before message)
+            value: tts
+          - label: Announce (plays chime before message)
+            value: announce
+          - label: Mobile Push (requires the Alexa app to be installed on a phone)
+            value: push
+sequence:
+  - variables:
+      target_entities: >
+        {% if devices is defined %}
+          {% set ns = namespace(entities=[]) %}
+          {% set entities = devices | map("device_entities") | list %}
+          {% for entity_list in entities %}
+            {% set ns.entities = ns.entities + (entity_list | select("contains", "media_player.") | list) %}
+          {% endfor %}
+          {% set target_entities = ns.entities %}
+        {% else %}
+          {% set target_entities = integration_entities("alexa_media") | select("contains", "media_player") | list %}
+        {% endif %}
+        {{ target_entities }}
+  - service: notify.alexa_media
+    data: 
+      title: "{% if title is defined %}{{ title }}{% endif %}"
+      message: "{{message}}"
+      data:
+        type: "{{type}}"
+      target: "{{target_entities}}"
